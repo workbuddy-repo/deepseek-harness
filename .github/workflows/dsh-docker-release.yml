@@ -1,0 +1,177 @@
+name: dsh → Docker 镜像（正式版自动构建）
+
+# 触发方式
+#   1. 定时轮询（默认每 6 小时）：只在探测到新的「正式版」时构建
+#   2. 手动触发：可指定任意版本（含 rc），用于补建或验证
+on:
+  schedule:
+    - cron: '0 2,8,14,20 * * *'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '指定版本（如 0.3.0）；留空则自动探测最新正式版'
+        required: false
+        default: ''
+      force:
+        description: '镜像已存在也强制重建'
+        type: boolean
+        default: false
+
+# 同一时间只跑一个，避免定时与手动重叠
+concurrency:
+  group: dsh-docker-image
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # 打 git tag 记录已构建版本
+  packages: write   # 推送 GHCR
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/deepseek-harness
+  NODE_VERSION: '24'
+  # 需要多架构时改成 linux/amd64,linux/arm64（上游带 arm64 预编译，但未在本仓库验证）
+  PLATFORMS: linux/amd64
+
+jobs:
+  resolve:
+    name: 解析版本
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.detect.outputs.version }}
+      build: ${{ steps.decide.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 探测最新正式版
+        id: detect
+        env:
+          REQUESTED_VERSION: ${{ inputs.version || '' }}
+        run: node .github/scripts/resolve-dsh-version.mjs
+
+      - name: 判断镜像是否已存在
+        id: decide
+        if: steps.detect.outputs.version != ''
+        env:
+          VERSION: ${{ steps.detect.outputs.version }}
+          FORCE: ${{ inputs.force || false }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ "$FORCE" = "true" ]; then
+            echo "::notice::force=true，跳过存在性检查"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "$TOKEN" | docker login ghcr.io -u "${{ github.repository_owner }}" --password-stdin >/dev/null
+          if docker manifest inspect "$IMAGE:$VERSION" >/dev/null 2>&1; then
+            echo "::notice::$IMAGE:$VERSION 已存在，跳过构建"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: 构建 / 验证 / 推送
+    needs: resolve
+    if: needs.resolve.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      VERSION: ${{ needs.resolve.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 计算镜像标签
+        id: tags
+        run: |
+          set -euo pipefail
+          {
+            echo "tags<<TAGS_EOF"
+            echo "$IMAGE:$VERSION"
+            # 只有正式版才更新 latest，避免预发布版覆盖稳定通道
+            if printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+              echo "$IMAGE:latest"
+            fi
+            echo "TAGS_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: 构建并推送
+        uses: docker/build-push-action@v6
+        with:
+          context: docker
+          file: docker/Dockerfile
+          platforms: ${{ env.PLATFORMS }}
+          push: true
+          build-args: |
+            DSH_VERSION=${{ env.VERSION }}
+            NODE_VERSION=${{ env.NODE_VERSION }}
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: |
+            org.opencontainers.image.title=DeepSeek Harness
+            org.opencontainers.image.version=${{ env.VERSION }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # 镜像不是"构建成功"就算完：必须能真的起来并吐出可登录的 URL
+      - name: 冒烟验证
+        run: |
+          set -euo pipefail
+          IMG="$IMAGE:$VERSION"
+          docker pull --platform linux/amd64 "$IMG"
+          docker run -d --name smoke -p 3080:3080 "$IMG"
+
+          for _ in $(seq 1 30); do
+            if docker logs smoke 2>&1 | grep -q 'listening on'; then break; fi
+            sleep 2
+          done
+          docker logs smoke 2>&1 | tail -20
+          docker logs smoke 2>&1 | grep -q 'listening on' || { echo "::error::服务未监听"; exit 1; }
+
+          URL=$(docker logs smoke 2>&1 | grep -o 'http://[^ ]*token=[A-Za-z0-9_-]*' | tail -1)
+          [ -n "$URL" ] || { echo "::error::日志中没有带 token 的启动 URL"; exit 1; }
+          TOKEN=$(printf '%s' "$URL" | sed 's/.*token=//')
+
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' -L "http://localhost:3080/?token=$TOKEN")
+          echo "首页状态码：$CODE"
+          [ "$CODE" = "200" ] || { echo "::error::首页返回 $CODE"; exit 1; }
+
+          ANON=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:3080/")
+          echo "无 token 状态码：$ANON"
+          [ "$ANON" = "401" ] || { echo "::error::鉴权未生效，期望 401 实际 $ANON"; exit 1; }
+
+      - name: 清理容器
+        if: always()
+        run: docker rm -f smoke || true
+
+      - name: 记录已构建版本
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git tag "dsh-v$VERSION" 2>/dev/null || echo "tag 已存在"
+          git push origin "dsh-v$VERSION" 2>/dev/null || echo "tag 无需推送"
+
+      - name: 汇总
+        if: always()
+        run: |
+          {
+            echo "## dsh 镜像构建结果"
+            echo ""
+            echo "| 项 | 值 |"
+            echo "|---|---|"
+            echo "| 版本 | \`$VERSION\` |"
+            echo "| 镜像 | \`$IMAGE\` |"
+            echo "| 平台 | \`$PLATFORMS\` |"
+            echo "| 结果 | ${{ job.status }} |"
+          } >> "$GITHUB_STEP_SUMMARY"

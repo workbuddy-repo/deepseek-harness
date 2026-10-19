@@ -88,6 +88,23 @@ docker logs dsh | grep 'token='    # 取带 token 的启动 URL，浏览器打�
 
 环境变量、子命令透传、权限说明见下方。
 
+### 在飞牛 fnOS 上部署
+
+仓库根目录的 `docker-compose.yml` 已按飞牛场景设好默认值（`0.0.0.0` 绑定、uid 1000、GHCR 镜像），界面里粘贴即可：
+
+1. **Docker → Compose → 新增项目**，路径选一个空文件夹（如 `/vol1/1000/dsh`）。
+2. 先用「文件管理」在该目录下建 `data`、`workspace` 两个文件夹——以自己账户创建，属主才是 1000，容器才写得进去。
+3. 粘贴 compose 内容，把 `192.168.1.100` 改成 NAS 的局域网 IP（由 `DSH_LAN_ADDR` 一个变量控制，对应两处）。
+4. 勾选「创建项目后立即启动」。
+
+拉镜像前建议先在 SSH 里确认网络可达（ghcr.io 国内常超时）：
+
+```bash
+docker pull ghcr.io/workbuddy-repo/deepseek-harness:latest
+```
+
+起来后 `docker logs dsh | grep 'token='`；因为设了 `DSH_PUBLIC_URL`，日志里的链接可以直接点开。
+
 ## 几个不能想当然的地方
 
 这些都是实测踩出来的，不是推测：

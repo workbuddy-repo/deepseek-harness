@@ -1,47 +1,48 @@
-# DeepSeek Harness —— 单机部署
+# DeepSeek Harness —— 飞牛 fnOS 部署
 #
-# 镜像由 GitHub Actions 构建并推送到 GitHub Container Registry：
+# 镜像由 GitHub Actions 构建并推送到 GHCR，本文件只拉取、不构建：
 #   ghcr.io/workbuddy-repo/deepseek-harness
-# 每次正式版发布自动重建，latest 跟随最新的非 alpha 版本；也可用 DSH_VERSION 锁定。
 #
-# 持久化映射：
+# 部署前只需做两件事：
+#   1. 用「文件管理」在项目目录下新建 data、workspace 两个文件夹
+#      （以你自己的账户建，属主就是当前用户，容器才写得进去）
+#   2. 把下面出现的 192.168.1.100 改成 NAS 的局域网 IP（共两处，同一个变量控制）
+#
+# 首次启动后：
+#   docker logs dsh | grep 'token='     # 日志里的链接可直接点开
+#
+# 持久化：
 #   ./data       -> /data       会话日志、凭证、profile、已安装插件（DSH_HOME）
 #   ./workspace  -> /workspace  工作空间，agent 读写项目的根
-#
-# 首次启动前先让宿主目录归属容器内的 uid（默认 10001）：
-#   mkdir -p data workspace && sudo chown -R 10001:10001 data workspace
-#
-# 用法：
-#   docker compose pull
-#   docker compose up -d
-#   docker logs dsh | grep 'token='    # 取带 token 的启动 URL
 
 name: dsh
 
 services:
   dsh:
-    # 直接用 CI 构建好的镜像，不在本地编译
     image: ghcr.io/workbuddy-repo/deepseek-harness:${DSH_VERSION:-latest}
-    container_name: ${DSH_CONTAINER_NAME:-dsh}
+    container_name: dsh
     restart: unless-stopped
 
-    # 默认只绑回环，避免把端口直接暴露到公网；需要局域网访问改成 0.0.0.0
-    # 同时把访问用的 authority 加进 DSH_TRUSTED_HOSTS，否则接口返回 403。
+    # 对外发布到所有网卡，手机/电脑都能访问。
+    # 若 3080 被占用，改左边的端口，并同步改下面 DSH_PUBLIC_URL 里的端口。
     ports:
-      - "${DSH_BIND_ADDR:-127.0.0.1}:${DSH_PORT:-3080}:3080"
+      - "3080:3080"
 
     environment:
-      # 模型凭据：留空则启动后在 Settings → Models 里配
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
-      # 浏览器访问用的 authority，空格分隔
-      DSH_TRUSTED_HOSTS: ${DSH_TRUSTED_HOSTS:-localhost 127.0.0.1}
-      # 仅影响启动时打印/广告的 URL，不授予信任
-      DSH_PUBLIC_URL: ${DSH_PUBLIC_URL:-}
+      DSH_PORT: "3080"
+      # 浏览器地址栏用的是什么 authority，这里就要有什么，否则页面能开、接口全 403。
+      # 用域名访问时把域名也加进来，例如 "localhost 127.0.0.1 192.168.1.100 fnos.local"
+      DSH_TRUSTED_HOSTS: "localhost 127.0.0.1 ${DSH_LAN_ADDR:-192.168.1.100}"
+      # 仅影响启动时打印的 URL（让日志里的链接可以直接点），不参与鉴权
+      DSH_PUBLIC_URL: "http://${DSH_LAN_ADDR:-192.168.1.100}:3080/"
       # read-only / workspace-write / danger-full-access
-      DSH_PERMISSION_MODE: ${DSH_PERMISSION_MODE:-workspace-write}
+      DSH_PERMISSION_MODE: "workspace-write"
+      # 也可留空，启动后在 Settings → Models 里配
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
 
-    # 与宿主目录属主对齐；宿主用户 uid 不是 10001 时用 DSH_UID/DSH_GID 覆盖
-    user: "${DSH_UID:-10001}:${DSH_GID:-10001}"
+    # 与飞牛主账户对齐（通常 uid=1000，可用 id 确认）。
+    # 若目录属主不是 1000，改成实际值；实在不想管权限可用 "0:0" 以 root 运行。
+    user: "${DSH_UID:-1000}:${DSH_GID:-1000}"
     working_dir: /workspace
 
     volumes:
@@ -52,5 +53,3 @@ services:
 
     # dsh 收到 SIGTERM 后给插件树 5 秒优雅处置，留足余量
     stop_grace_period: 20s
-
-    # 镜像自带 HEALTHCHECK，这里不重复声明

@@ -56,9 +56,8 @@
 mkdir -p data workspace
 sudo chown -R 10001:10001 data workspace   # 容器内 uid 默认 10001
 
-docker compose up -d --build               # 本地构建
-# 或直接用已发布镜像
-docker compose pull && docker compose up -d
+docker compose pull
+docker compose up -d
 
 docker logs dsh | grep 'token='            # 取带 token 的启动 URL
 ```
@@ -123,10 +122,11 @@ docker run --rm IMAGE --version                           # dsh 版本
 docker run --rm -v "$PWD/ws:/workspace" IMAGE headless "总结这个仓库"
 ```
 
-## 本地构建（不走 CI）
+## 本地构建（可选，不走 CI）
+
+`docker-compose.yml` 默认直接拉 CI 镜像，不参与本地构建。确实需要自己编译时：
 
 ```bash
 docker build -t dsh:local --build-arg DSH_VERSION=0.2.1-rc.2 docker/
-# 或（在仓库根目录）
-docker compose up -d --build
+# 然后把 compose 里的 image 换成 dsh:local
 ```

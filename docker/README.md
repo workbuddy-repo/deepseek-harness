@@ -1,8 +1,10 @@
 # dsh Docker 镜像（自动化构建）
 
-本 fork 在原仓库基础上加了**一条自动构建流水线**：定时检查 `@deepseek-ai/dsh` 是否发布了新的正式版，一有就自动构建镜像并推送到 GitHub Container Registry。
+把 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 打包成可直接运行的 Docker 镜像。本仓库不改动上游任何源码，`docker/` 下的文件全部是新增的——它只负责镜像与发布流水线。
 
-原仓库没有 Dockerfile，`docker/` 下的文件是本 fork 新增的，不改动上游任何源码。
+**本仓库完全由 AI 创作**：Dockerfile、启动脚本、健康检查、CI 流水线与文档均由 AI 完成。
+
+流水线定时检查 `@deepseek-ai/dsh` 是否发布了新的正式版，一有就自动构建镜像并推送到 GitHub Container Registry。
 
 ## 自动化怎么工作
 

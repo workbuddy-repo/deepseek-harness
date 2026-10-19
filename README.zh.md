@@ -2,10 +2,12 @@
 
 [English](README.md) | 中文
 
-> **Fork 说明** —— 本 fork 在上游基础上增加了 Docker 打包与定时自动构建。
-> 镜像发布在 `ghcr.io/workbuddy-repo/deepseek-harness`，标签为 dsh 版本号与 `latest`
-> （规则：版本号不含 `alpha` 即视为正式版）。
-> 部署步骤与排障见 [docker/README.md](docker/README.md)。
+> **这个仓库是什么** —— 它把 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 打包成 Docker 镜像，不是 harness 源码的 fork，上游代码一行未改。
+>
+> - 把 npm 上发布的 `@deepseek-ai/dsh` 正式版打成可直接运行的镜像：`ghcr.io/workbuddy-repo/deepseek-harness`（标签为 dsh 版本号与 `latest`，版本号不含 `alpha` 即视为正式版）。
+> - **整个仓库完全由 AI 创作** —— Dockerfile、启动脚本、健康检查、CI 流水线与文档，全部由 AI 完成。
+> - 唯一目的是省事：不用装 Node、不用编译源码、不用调启动参数，`docker compose up -d` 起来就能用。
+> - 部署步骤与排障：[docker/README.md](docker/README.md)。
 
 DeepSeek Harness（`dsh`）是由 [DeepSeek AI](https://deepseek.com) 开发的开源 agent harness（智能体框架）。
 

@@ -2,10 +2,12 @@
 
 English | [中文](README.zh.md)
 
-> **Fork notice** — this fork adds Docker packaging and a scheduled image build on top of upstream.
-> Images are published to `ghcr.io/workbuddy-repo/deepseek-harness`, tagged with the dsh version and `latest`
-> (any release whose version does not contain `alpha`).
-> Deployment guide and troubleshooting: [docker/README.md](docker/README.md).
+> **What this repository is** — a Docker packaging project for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), not a fork of the harness source. Upstream code is untouched.
+>
+> - Packages the published `@deepseek-ai/dsh` release into a runnable image: `ghcr.io/workbuddy-repo/deepseek-harness` (tags: the dsh version and `latest`; any version without `alpha` counts as a release).
+> - **Entirely AI-authored** — the Dockerfile, entrypoint, health check, CI workflow and docs in this repository were written end to end by an AI agent.
+> - Its only purpose is convenience: no Node.js install, no source build, no startup flags to tune. `docker compose up -d` and the Web UI is up.
+> - Deployment guide and troubleshooting: [docker/README.md](docker/README.md).
 
 DeepSeek Harness (`dsh`) is an open-source agent harness developed by [DeepSeek AI](https://deepseek.com).
 

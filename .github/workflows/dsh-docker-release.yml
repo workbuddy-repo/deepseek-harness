@@ -149,7 +149,11 @@ jobs:
           [ -n "$URL" ] || { echo "::error::日志中没有带 token 的启动 URL"; exit 1; }
           TOKEN=$(printf '%s' "$URL" | sed 's/.*token=//')
 
-          CODE=$(curl -s -o /dev/null -w '%{http_code}' -L "http://localhost:3080/?token=$TOKEN")
+          # 必须带 cookie jar：首次带 token 的请求返回 303 并种下会话 Cookie，
+          # 重定向到 / 时要把它带上，否则拿到的就是 401。
+          JAR=/tmp/dsh-cookies.txt
+          rm -f "$JAR"
+          CODE=$(curl -s -c "$JAR" -b "$JAR" -L -o /dev/null -w '%{http_code}' "http://localhost:3080/?token=$TOKEN")
           echo "首页状态码：$CODE"
           [ "$CODE" = "200" ] || { echo "::error::首页返回 $CODE"; exit 1; }
 

@@ -1,0 +1,59 @@
+# DeepSeek Harness —— 单机部署
+#
+# 持久化约定（两个映射，缺一不可）：
+#   ./data       -> /data       会话日志、凭证、profile、已安装插件（DSH_HOME）
+#   ./workspace  -> /workspace  agent 读写项目的目录，也就是"工作空间"
+#
+# 两者默认落在 compose 文件同级目录，方便直接备份/审阅。
+# 首次启动前需让宿主目录归属容器内的 uid（默认 10001）：
+#   mkdir -p data workspace && sudo chown -R 10001:10001 data workspace
+#
+# 用法：
+#   docker compose up -d --build      # 本地构建
+#   docker compose pull && docker compose up -d   # 用已发布镜像
+#   docker logs dsh | grep 'token='   # 取带 token 的启动 URL
+
+name: dsh
+
+services:
+  dsh:
+    build:
+      context: ./docker
+      args:
+        DSH_VERSION: ${DSH_VERSION:-0.2.1-rc.2}
+        # 用 DSH_ 前缀，避免被宿主环境里的 NODE_VERSION（nvm 等）意外顶掉
+        NODE_VERSION: ${DSH_NODE_VERSION:-24}
+    # 有同名镜像时可直接 pull，不触发构建
+    image: ${DSH_IMAGE:-ghcr.io/workbuddy-repo/deepseek-harness}:${DSH_VERSION:-0.2.1-rc.2}
+    container_name: ${DSH_CONTAINER_NAME:-dsh}
+    restart: unless-stopped
+
+    # 默认只绑回环，避免把端口直接暴露到公网；需要局域网访问改成 0.0.0.0
+    # 同时要把访问用的 authority 加进 DSH_TRUSTED_HOSTS，否则接口返回 403。
+    ports:
+      - "${DSH_BIND_ADDR:-127.0.0.1}:${DSH_PORT:-3080}:3080"
+
+    environment:
+      # 模型凭据：留空则启动后在 Settings → Models 里配
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      # 浏览器访问用的 authority，空格分隔
+      DSH_TRUSTED_HOSTS: ${DSH_TRUSTED_HOSTS:-localhost 127.0.0.1}
+      # 仅影响启动时打印/广告的 URL，不授予信任
+      DSH_PUBLIC_URL: ${DSH_PUBLIC_URL:-}
+      # read-only / workspace-write / danger-full-access
+      DSH_PERMISSION_MODE: ${DSH_PERMISSION_MODE:-workspace-write}
+
+    # 与宿主目录属主对齐；宿主用户 uid 不是 10001 时用 DSH_UID/DSH_GID 覆盖
+    user: "${DSH_UID:-10001}:${DSH_GID:-10001}"
+    working_dir: /workspace
+
+    volumes:
+      # 持久化状态：会话日志、凭证、profile、插件
+      - ${DSH_DATA_DIR:-./data}:/data
+      # 工作空间：agent 的默认工作目录，也是它读写项目的根
+      - ${DSH_WORKSPACE_DIR:-./workspace}:/workspace
+
+    # dsh 收到 SIGTERM 后给插件树 5 秒优雅处置，留足余量
+    stop_grace_period: 20s
+
+    # 镜像自带 HEALTHCHECK，这里不重复声明

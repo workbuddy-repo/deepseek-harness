@@ -43,11 +43,44 @@
 
 ## 镜像怎么用
 
-```bash
-docker pull ghcr.io/<owner>/deepseek-harness:latest
+### 方式一：docker compose（推荐）
 
+仓库根目录的 `docker-compose.yml` 已经配好两个持久化映射：
+
+| 宿主路径 | 容器路径 | 内容 |
+|---|---|---|
+| `./data` | `/data` | 会话日志、凭证、profile、已安装插件（`DSH_HOME`） |
+| `./workspace` | `/workspace` | 工作空间，agent 读写项目的根目录 |
+
+```bash
+mkdir -p data workspace
+sudo chown -R 10001:10001 data workspace   # 容器内 uid 默认 10001
+
+docker compose up -d --build               # 本地构建
+# 或直接用已发布镜像
+docker compose pull && docker compose up -d
+
+docker logs dsh | grep 'token='            # 取带 token 的启动 URL
+```
+
+路径可以用 `.env` 覆盖，不必改 compose：
+
+```dotenv
+DSH_DATA_DIR=/srv/dsh/state
+DSH_WORKSPACE_DIR=/srv/projects/my-app
+DSH_PORT=3080
+DSH_TRUSTED_HOSTS=localhost 127.0.0.1 192.168.1.20:3080
+DEEPSEEK_API_KEY=sk-xxx
+```
+
+> 默认只绑定 `127.0.0.1`。要局域网访问，设 `DSH_BIND_ADDR=0.0.0.0`，
+> 并把访问用的 `IP:端口` 加进 `DSH_TRUSTED_HOSTS`，否则接口返回 403。
+
+### 方式二：docker run
+
+```bash
 docker run -d --name dsh -p 3080:3080 \
-  -v dsh-home:/data \
+  -v "$PWD/data:/data" \
   -v "$PWD/workspace:/workspace" \
   ghcr.io/<owner>/deepseek-harness:latest
 
@@ -94,6 +127,6 @@ docker run --rm -v "$PWD/ws:/workspace" IMAGE headless "总结这个仓库"
 
 ```bash
 docker build -t dsh:local --build-arg DSH_VERSION=0.2.1-rc.2 docker/
-# 或
-cd docker && docker compose up -d
+# 或（在仓库根目录）
+docker compose up -d --build
 ```

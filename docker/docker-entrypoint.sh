@@ -6,6 +6,23 @@
 # 所以必须在 entrypoint 里解析后注入 --host。
 set -eu
 
+# 绑定挂载最常见的失败：宿主目录属于别的 uid，容器内的非 root 用户写不进去。
+# 不提前拦下来的话，表现得像"插件加载异常"，很难定位。这里直接给出可执行的修复命令。
+DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
+export DSH_HOME
+
+if ! mkdir -p "$DSH_HOME" 2>/dev/null || [ ! -w "$DSH_HOME" ]; then
+    echo "dsh: DSH_HOME=$DSH_HOME 不可写（容器内 uid=$(id -u) gid=$(id -g)）。" >&2
+    echo "     宿主目录需归属同一 uid，例如：" >&2
+    echo "       sudo chown -R $(id -u):$(id -g) <宿主上的 data 目录>" >&2
+    echo "     或在 compose 中设置 user: \"\$(id -u):\$(id -g)\" 对齐宿主用户。" >&2
+    exit 73
+fi
+
+if [ -d /workspace ] && [ ! -w /workspace ]; then
+    echo "dsh: 提示 /workspace 对 uid=$(id -u) 只读，agent 将无法写入该目录。" >&2
+fi
+
 if [ "$#" -eq 0 ]; then
     set -- web
 fi

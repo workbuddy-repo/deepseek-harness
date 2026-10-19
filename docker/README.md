@@ -10,16 +10,16 @@
 定时触发（每 6 小时）或手动触发
         │
         ▼
-解析版本 ── 扫描 npm registry 全部版本，只保留严格 x.y.z（无 -rc/-alpha 后缀），取最大
-        │   ↳ 当前 latest dist-tag 指向 0.2.1-rc.2，是预发布版，不能作为依据
+解析版本 ── 扫描 npm registry 全部版本，排除含 alpha 的，其余按 semver 取最大
+        │   ↳ 即 rc / beta 也算正式版；不看 latest dist-tag（发布策略会变）
         ▼
 判断是否已构建 ── 查 ghcr.io/<owner>/deepseek-harness:<version> 是否已存在
         │
         ▼
-构建并推送 ── 正式版同时更新 :latest；预发布版只打具体版本号
+构建并推送 ── 不含 alpha 的版本同时更新 :latest
         │
         ▼
-冒烟验证 ── 起容器 → 等 "listening on" → 用日志里的 token 登录 → 断言 200；无 token 断言 401
+冒烟验证 ── 起容器 → 等带 token 的启动 URL → 带 cookie 登录 → 断言 200；无 token 断言 401
         │
         ▼
 打 git tag dsh-v<version> 记录已构建版本

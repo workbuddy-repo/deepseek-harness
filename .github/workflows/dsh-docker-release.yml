@@ -2,7 +2,10 @@ name: dsh → Docker 镜像（正式版自动构建）
 
 # 触发方式
 #   1. 定时轮询（默认每 6 小时）：只在探测到新的「正式版」时构建
-#   2. 手动触发：可指定任意版本（含 rc），用于补建或验证
+#   2. 手动触发：可指定任意版本（含 alpha），用于补建或验证
+#
+# 「正式版」的判定：版本号里不含 alpha 即视为正式版。
+# 因此 0.2.1-rc.2、0.3.0-beta.1 都会自动构建，只有 0.2.1-alpha.5 这类被排除。
 on:
   schedule:
     - cron: '0 2,8,14,20 * * *'
@@ -96,8 +99,8 @@ jobs:
           {
             echo "tags<<TAGS_EOF"
             echo "$IMAGE:$VERSION"
-            # 只有正式版才更新 latest，避免预发布版覆盖稳定通道
-            if printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            # 与版本判定同一条规则：不含 alpha 即为正式版，同时更新 latest
+            if ! printf '%s' "$VERSION" | grep -qi 'alpha'; then
               echo "$IMAGE:latest"
             fi
             echo "TAGS_EOF"

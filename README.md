@@ -2,6 +2,11 @@
 
 English | [中文](README.zh.md)
 
+> **Fork notice** — this fork adds Docker packaging and a scheduled image build on top of upstream.
+> Images are published to `ghcr.io/workbuddy-repo/deepseek-harness`, tagged with the dsh version and `latest`
+> (any release whose version does not contain `alpha`).
+> Deployment guide and troubleshooting: [docker/README.md](docker/README.md).
+
 DeepSeek Harness (`dsh`) is an open-source agent harness developed by [DeepSeek AI](https://deepseek.com).
 
 It is built on an **everything-is-a-plugin** architecture and powered by [Cordis](https://github.com/cordiverse/cordis), whose design is described in [_A Programming Paradigm for Spatiotemporal Composability_](https://arxiv.org/abs/2608.25512).
@@ -39,6 +44,33 @@ pnpm dsh web
 ```
 
 `pnpm run build` prepares the repository artifacts. `pnpm dsh web` uses those built artifacts without rebuilding.
+
+### Run from Docker
+
+Prebuilt images are available at `ghcr.io/workbuddy-repo/deepseek-harness`. The repository's
+[`docker-compose.yml`](docker-compose.yml) only pulls and runs — it never builds locally.
+
+```sh
+mkdir -p data workspace
+sudo chown -R 1000:1000 data workspace   # must match the container user
+
+docker compose up -d
+docker logs dsh | grep 'token='          # open the printed URL, token included
+```
+
+Two bind mounts carry all mutable state: `./data` holds sessions, credentials, profiles and installed
+plugins (`DSH_HOME`); `./workspace` is the directory the agent reads and writes.
+
+Two things are easy to get wrong:
+
+- **Set `DSH_LAN_ADDR` to the address you type in the browser.** The container cannot bind `0.0.0.0`,
+  so the entrypoint resolves the container address at startup, while `/api` requests are fenced by the
+  browser's `Host` header. If the two disagree, the page loads but every API call returns `403`.
+- **The first visit must carry `?token=`.** Opening the bare `IP:3080` (or the NAS panel's "open" button,
+  which does not append a token) returns `401`. The login cookie is issued on the first token visit; after
+  that the bare address works.
+
+Full guide, environment variables and a troubleshooting sequence: [docker/README.md](docker/README.md).
 
 ## Community and support
 

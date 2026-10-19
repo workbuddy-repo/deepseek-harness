@@ -2,6 +2,11 @@
 
 [English](README.md) | 中文
 
+> **Fork 说明** —— 本 fork 在上游基础上增加了 Docker 打包与定时自动构建。
+> 镜像发布在 `ghcr.io/workbuddy-repo/deepseek-harness`，标签为 dsh 版本号与 `latest`
+> （规则：版本号不含 `alpha` 即视为正式版）。
+> 部署步骤与排障见 [docker/README.md](docker/README.md)。
+
 DeepSeek Harness（`dsh`）是由 [DeepSeek AI](https://deepseek.com) 开发的开源 agent harness（智能体框架）。
 
 它构建于**一切皆插件**的架构之上，由 [Cordis](https://github.com/cordiverse/cordis) 驱动，其设计参见论文 [_A Programming Paradigm for Spatiotemporal Composability_](https://arxiv.org/abs/2608.25512)。
@@ -43,6 +48,31 @@ pnpm dsh web
 ```
 
 `pnpm run build` 会准备仓库产物。`pnpm dsh web` 会直接使用这些已构建产物，不会重新构建。
+
+### 通过 Docker 运行
+
+预构建镜像发布在 `ghcr.io/workbuddy-repo/deepseek-harness`。仓库根目录的
+[`docker-compose.yml`](docker-compose.yml) 只负责拉取与运行，不会在本地构建。
+
+```sh
+mkdir -p data workspace
+sudo chown -R 1000:1000 data workspace   # 需与容器内用户一致
+
+docker compose up -d
+docker logs dsh | grep 'token='          # 打开日志里带 token 的链接
+```
+
+两个挂载目录承载全部可变状态：`./data` 存会话日志、凭证、profile 和已安装插件（`DSH_HOME`）；
+`./workspace` 是 agent 读写项目的根目录。
+
+两处最容易踩空：
+
+- **`DSH_LAN_ADDR` 要填成浏览器里实际输入的地址。** 容器不能绑 `0.0.0.0`，入口脚本会在启动时
+  解析容器地址；而 `/api` 请求受浏览器 `Host` 头围栏保护。两者不一致时页面能打开，但每个接口都返回 `403`。
+- **首次访问必须带 `?token=`。** 直接打开 `IP:3080`（或 NAS 面板的「访问」按钮，它不会附加 token）
+  只会得到 `401`。首次用带 token 的链接访问后会种下登录 cookie，之后裸地址即可正常使用。
+
+完整说明、环境变量与排障顺序见 [docker/README.md](docker/README.md)。
 
 ## 社区与支持
 

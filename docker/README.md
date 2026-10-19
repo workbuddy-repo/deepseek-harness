@@ -45,7 +45,7 @@
 
 ### 方式一：docker compose（推荐）
 
-仓库根目录的 `docker-compose.yml` 走 **host 网络**，文件里没有任何 IP，也不需要 `.env`：
+仓库根目录的 `docker-compose.yml` 已经配好两个持久化映射：
 
 | 宿主路径 | 容器路径 | 内容 |
 |---|---|---|
@@ -55,36 +55,31 @@
 ```bash
 mkdir -p data workspace
 sudo chown -R 1000:1000 data workspace     # 与 compose 里的 user 对齐
+
 docker compose pull
 docker compose up -d
 
 docker logs dsh | grep 'token='            # 取带 token 的启动 URL
 ```
 
-启动时会打印两行自检信息，出问题先看这里：
-
-```
-dsh: listen   192.168.1.13:3080
-dsh: trusted  192.168.1.13 fnos localhost 127.0.0.1
-```
-
-`listen` 是自动探测到的「默认路由网卡」地址，`trusted` 是本机所有地址 + 主机名 + 回环。
-宿主换 IP、换网段、换 DHCP 租约之后，`docker compose up -d` 重启一次即可，不用改文件。
-
-只有**用域名访问**（反向代理、飞牛远程访问）时才需要补一条：
+路径与地址可以用 `.env` 覆盖，不必改 compose：
 
 ```dotenv
-DSH_TRUSTED_HOSTS=dsh.example.com
+DSH_LAN_ADDR=192.168.1.13
+DSH_PORT=3080
+DEEPSEEK_API_KEY=sk-xxx
 ```
 
-> host 网络的两个副作用，都属于正常：
-> - 飞牛面板里看不到端口映射（没有 NAT，容器直接占用宿主 3080）；
-> - 在 NAS 本机上用 `localhost:3080` 连不上，请用 NAS 的局域网 IP（dsh 只绑一块具体网卡，不监听回环）。
+> **`DSH_LAN_ADDR` 必须填 NAS 的局域网 IP**，且浏览器必须用同一个 IP 访问。
+> dsh 的 Host 围栏是精确匹配：写成 `192.168.1.13`，用 `192.168.1.20` 或别的主机名访问都会 403。
+> 端口映射把请求转发进容器时会原样保留 `Host` 头，所以这一步绕不过去。
 
 ### 方式二：docker run
 
 ```bash
-docker run -d --name dsh --network host \
+docker run -d --name dsh -p 3080:3080 \
+  -e DSH_TRUSTED_HOSTS=192.168.1.13 \
+  -e DSH_PUBLIC_URL=http://192.168.1.13:3080/ \
   -v "$PWD/data:/data" \
   -v "$PWD/workspace:/workspace" \
   -u "$(id -u):$(id -g)" \
@@ -97,11 +92,11 @@ docker logs dsh | grep 'token='    # 取带 token 的启动 URL，浏览器打�
 
 ### 在飞牛 fnOS 上部署
 
-仓库根目录的 `docker-compose.yml` 已按飞牛场景设好默认值（host 网络、uid 1000、GHCR 镜像），界面里粘贴即可：
+仓库根目录的 `docker-compose.yml` 已按飞牛场景设好默认值（bridge + 端口映射、uid 1000、GHCR 镜像）：
 
 1. **Docker → Compose → 新增项目**，路径选一个空文件夹（如 `/vol1/1000/Docker/DSH`）。
 2. 先用「文件管理」在该目录下建 `data`、`workspace` 两个文件夹——以自己账户创建，属主才是 1000，容器才写得进去。
-3. 粘贴 compose 内容，**不用改任何 IP**。
+3. 粘贴 compose 内容，把 `192.168.1.100` 全部换成 NAS 的局域网 IP。
 4. 勾选「创建项目后立即启动」。
 
 拉镜像前建议先在 SSH 里确认网络可达（ghcr.io 国内常超时）：
@@ -110,7 +105,15 @@ docker logs dsh | grep 'token='    # 取带 token 的启动 URL，浏览器打�
 docker pull ghcr.io/workbuddy-repo/deepseek-harness:latest
 ```
 
-起来后 `docker logs dsh | grep 'token='`，日志里打印的地址可以直接点开。
+起来后取登录地址：
+
+```bash
+docker logs dsh | grep 'token='
+```
+
+**首次进入必须用这条带 `?token=` 的完整链接。** 直接敲 `http://IP:3080`、或用飞牛面板的「访问」按钮（只拼 `IP:端口`，不带 token）都会得到 401，页面表现为白屏或一闪而过。登录成功后 cookie 会记住这次会话，之后用裸地址就正常了。
+
+容器每次重建 token 都会变，旧链接、旧书签随之失效。
 
 ## 几个不能想当然的地方
 
@@ -118,11 +121,11 @@ docker pull ghcr.io/workbuddy-repo/deepseek-harness:latest
 
 | 约束 | 说明 |
 |---|---|
-| **`--host 0.0.0.0` 会失败** | dsh 的 HTTP 服务拒绝通配地址，只接受具体网卡字面量。所以监听地址由 `docker-entrypoint.sh` 运行时解析（`resolve-host.mjs`，默认路由网卡优先） |
-| **Host 围栏与监听地址是两件事** | 页面能打开但接口 403，说明 `Host` 不在信任列表。host 网络下监听地址自动受信，故无需配置；bridge / 域名 / 反代场景才需要补 `DSH_TRUSTED_HOSTS` |
+| **`--host 0.0.0.0` 会失败** | dsh 的 HTTP 服务拒绝通配地址，只接受具体网卡字面量。容器 IP 运行时才定，所以由 `docker-entrypoint.sh` 解析后注入 |
+| **401 和 403 是两件事** | `401`＝没登录（缺 token 或 cookie），`403`＝Host 不在信任列表。登录页一闪而过多半是 403，白屏才是 401 |
+| **Host 围栏是精确匹配** | `DSH_TRUSTED_HOSTS=*` 不会通配（能通过启动校验，但匹配不到任何地址，等于没配）。IP 换了就要改配置 |
 | **Node 必须 ≥ 22.19** | 入口用 `import.meta.main`；22.13 实测 `dsh --version` 无输出、退出码 0，静默失败 |
 | **不需要编译工具链** | 原生模块随包提供 glibc 预编译，`npm install` 即可。因此**不要**放开 npm 的 install-scripts，那会触发 `node-gyp rebuild` 反而需要 python/g++ |
-| **首次访问必须带 token** | 裸访问返回 401，容易误判成服务挂了 |
 | **挂载目录权限** | 容器内以 `DSH_UID:DSH_GID`（默认 1000）运行，挂 root 拥有的目录写不进去，需 `chown -R 1000:1000` |
 
 ### 环境变量
@@ -130,9 +133,9 @@ docker pull ghcr.io/workbuddy-repo/deepseek-harness:latest
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `DSH_PORT` | `3080` | 监听端口 |
-| `DSH_BIND_ADDR` / `DSH_HOST` | 自动探测 | 一般留空。默认路由网卡的 IPv4 作为监听地址；**不要设 `0.0.0.0`** |
-| `DSH_TRUSTED_HOSTS` | 空（自动） | 留空即信任本机所有 IPv4 + 主机名 + 回环；填了则**追加**，用于域名/反代，空格分隔 |
-| `DSH_PUBLIC_URL` | 空 | 仅影响打印的 URL，不授予信任；留空时按监听地址生成 |
+| `DSH_HOST` | 自动探测 | 一般留空（取容器第一个非回环 IPv4）；**不要设 `0.0.0.0`** |
+| `DSH_TRUSTED_HOSTS` | `localhost 127.0.0.1` | 空格分隔的 authority 白名单，必须包含浏览器访问用的 IP 或域名；不带端口＝任意端口 |
+| `DSH_PUBLIC_URL` | 空 | 仅影响打印的 URL，不授予信任 |
 | `DSH_TLS_CERT` / `DSH_TLS_KEY` | 空 | 直连 HTTPS，必须成对 |
 | `DSH_PERMISSION_MODE` | `workspace-write` | 可设 `read-only` / `danger-full-access` |
 | `DSH_UID` / `DSH_GID` | `1000` | 容器运行身份，需与宿主目录属主一致 |
@@ -145,6 +148,22 @@ docker pull ghcr.io/workbuddy-repo/deepseek-harness:latest
 docker run --rm -it IMAGE bash                            # 进容器
 docker run --rm IMAGE --version                           # dsh 版本
 docker run --rm -v "$PWD/ws:/workspace" IMAGE headless "总结这个仓库"
+```
+
+## 排障顺序
+
+按这个顺序查，每一步都能把范围砍一半：
+
+```bash
+# 1. 端口是否通（000 = 没监听）
+curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: 192.168.1.13:3080' http://127.0.0.1:3080/api/directoryPicker/list
+
+# 2. 401 正常、403 说明白名单没写对
+docker exec dsh printenv | grep DSH_TRUSTED
+
+# 3. 拿最新 token 看服务端链路（303 + set-cookie 才对）
+U=$(docker logs dsh 2>&1 | grep -o 'http://[^ ]*token=[A-Za-z0-9_-]*' | tail -1); echo "$U"
+curl -s -o /dev/null -D - -c /tmp/j -b /tmp/j "$U" | grep -Ei '^HTTP/|^location|^set-cookie'
 ```
 
 ## 本地构建（可选，不走 CI）

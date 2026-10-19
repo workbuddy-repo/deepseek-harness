@@ -1,22 +1,16 @@
-# DeepSeek Harness —— 飞牛 fnOS 部署（不固定 IP）
+# DeepSeek Harness —— 飞牛 fnOS 部署
 #
-# 这份文件里没有任何 IP，也不需要 .env：
-#   容器用 host 网络直接占用宿主的 3080 端口，启动时自动探测「默认路由那块网卡」
-#   的地址作为监听地址，并把本机所有地址一并加入信任列表。
-#   换路由器、换 DHCP 租约、换网段之后，`docker compose up -d` 重启一次即可，
-#   浏览器照旧用「NAS 当前 IP:3080」打开。
+# 镜像由 GitHub Actions 构建并推送到 GHCR，本文件只拉取、不构建：
+#   ghcr.io/workbuddy-repo/deepseek-harness
 #
-# 为什么必须这样：dsh 的 web 服务器拒绝绑定 0.0.0.0，只接受某块网卡的具体地址；
-# 同时 /api 的 Host 围栏只认「回环 / 监听地址本身 / 信任列表里的 authority」，
-# 不匹配就是 403（表现成登录页打开即关闭、无法创建工作区）。
-# 在 bridge 网络下容器看不到宿主 IP，只能靠人填，填错就 403 —— 这里直接绕开。
+# 部署前需要做三件事：
+#   1. 用「文件管理」在项目目录下新建 data、workspace 两个文件夹
+#      （以你自己的账户建，属主就是当前用户，容器才写得进去）
+#   2. 把下面的 192.168.1.100 改成 NAS 的局域网 IP（两处，由同一个变量控制）
+#   3. 浏览器访问时用这个 IP，不能用 localhost
 #
-# 部署前只需两步：
-#   1. 在项目目录下建好 data、workspace 两个文件夹（用你自己的账户建）；
-#   2. docker compose up -d
-#
-# 首次启动后取带 token 的登录地址：
-#   docker logs dsh | grep 'token='
+# 首次启动后：
+#   docker logs dsh | grep 'token='     # 日志里的链接可直接点开
 #
 # 持久化：
 #   ./data       -> /data       会话日志、凭证、profile、已安装插件（DSH_HOME）
@@ -30,20 +24,18 @@ services:
     container_name: dsh
     restart: unless-stopped
 
-    # host 网络：容器直接用宿主的网卡与端口。
-    # 好处是启动时能读到宿主真实 IP（换 IP 不用改配置）；
-    # 代价是不走 Docker 端口映射 —— 飞牛面板里看不到端口映射，属正常现象。
-    # host 模式下不能再写 ports:，否则 compose 会报冲突。
-    network_mode: host
+    # 对外发布到所有网卡，手机/电脑都能访问。
+    # 若 3080 被占用，改左边的端口，并同步改下面 DSH_PUBLIC_URL 里的端口。
+    ports:
+      - "3080:3080"
 
     environment:
       DSH_PORT: "3080"
-      # 留空 = 自动信任本机所有地址 + 主机名。只有在「用域名访问」时才需要补：
-      #   DSH_TRUSTED_HOSTS: "dsh.example.com"
-      # 反向代理（含飞牛远程访问、HTTPS 终结）时，把对外域名填进来即可。
-      DSH_TRUSTED_HOSTS: "${DSH_TRUSTED_HOSTS:-}"
-      # 留空则由 dsh 依据监听地址生成 —— 日志里打印的就是能直接点的地址。
-      DSH_PUBLIC_URL: "${DSH_PUBLIC_URL:-}"
+      # 浏览器地址栏用的是什么 authority，这里就要有什么，否则页面能开、接口全 403。
+      # 用域名访问时把域名也加进来，例如 "localhost 127.0.0.1 192.168.1.100 fnos.local"
+      DSH_TRUSTED_HOSTS: "localhost 127.0.0.1 ${DSH_LAN_ADDR:-192.168.1.100}"
+      # 仅影响启动时打印的 URL（让日志里的链接可以直接点），不参与鉴权
+      DSH_PUBLIC_URL: "http://${DSH_LAN_ADDR:-192.168.1.100}:3080/"
       # read-only / workspace-write / danger-full-access
       DSH_PERMISSION_MODE: "workspace-write"
       # 也可留空，启动后在 Settings → Models 里配

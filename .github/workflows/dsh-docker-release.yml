@@ -134,13 +134,16 @@ jobs:
           docker run -d --name smoke -p 3080:3080 "$IMG"
 
           READY=false
+          # 就绪信号等的是"带 token 的启动 URL"，而不是第一行 "listening on"：
+          # 后者刷出时 URL 还没打印，此刻抓日志会拿到空 URL 而误判失败。
           for _ in $(seq 1 30); do
             docker logs smoke > "$LOG" 2>&1 || true
-            if grep -q 'listening on' "$LOG"; then READY=true; break; fi
+            if grep -q 'token=' "$LOG"; then READY=true; break; fi
             sleep 2
           done
+          docker logs smoke > "$LOG" 2>&1 || true
           cat "$LOG"
-          [ "$READY" = "true" ] || { echo "::error::服务未在 60s 内监听"; docker ps -a; exit 1; }
+          [ "$READY" = "true" ] || { echo "::error::服务未在 60s 内就绪"; docker ps -a; exit 1; }
 
           URL=$(grep -o 'http://[^ ]*token=[A-Za-z0-9_-]*' "$LOG" | tail -1 || true)
           [ -n "$URL" ] || { echo "::error::日志中没有带 token 的启动 URL"; exit 1; }

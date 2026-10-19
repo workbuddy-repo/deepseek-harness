@@ -1,41 +1,43 @@
 # DeepSeek Harness
 
-English | [中文](README.zh.md)
-
-> **What this repository is** — a Docker packaging project for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), not a fork of the harness source. Upstream code is untouched.
+> **这个仓库是什么** —— 它把 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 打包成 Docker 镜像，不是 harness 源码的 fork，上游代码一行未改。
 >
-> - Packages the published `@deepseek-ai/dsh` release into a runnable image: `ghcr.io/workbuddy-repo/deepseek-harness` (tags: the dsh version and `latest`; any version without `alpha` counts as a release).
-> - **Entirely AI-authored** — the Dockerfile, entrypoint, health check, CI workflow and docs in this repository were written end to end by an AI agent.
-> - Its only purpose is convenience: no Node.js install, no source build, no startup flags to tune. `docker compose up -d` and the Web UI is up.
-> - Deployment guide and troubleshooting: [docker/README.md](docker/README.md).
+> - 把 npm 上发布的 `@deepseek-ai/dsh` 正式版打成可直接运行的镜像：`ghcr.io/workbuddy-repo/deepseek-harness`（标签为 dsh 版本号与 `latest`，版本号不含 `alpha` 即视为正式版）。
+> - **整个仓库完全由 AI 创作** —— Dockerfile、启动脚本、健康检查、CI 流水线与文档，全部由 AI 完成。
+> - 唯一目的是省事：不用装 Node、不用编译源码、不用调启动参数，`docker compose up -d` 起来就能用。
+> - 部署步骤与排障：[docker/README.md](docker/README.md)。
 
-DeepSeek Harness (`dsh`) is an open-source agent harness developed by [DeepSeek AI](https://deepseek.com).
+DeepSeek Harness（`dsh`）是由 [DeepSeek AI](https://deepseek.com) 开发的开源 agent harness（智能体框架）。
 
-It is built on an **everything-is-a-plugin** architecture and powered by [Cordis](https://github.com/cordiverse/cordis), whose design is described in [_A Programming Paradigm for Spatiotemporal Composability_](https://arxiv.org/abs/2608.25512).
+它构建于**一切皆插件**的架构之上，由 [Cordis](https://github.com/cordiverse/cordis) 驱动，其设计参见论文 [_A Programming Paradigm for Spatiotemporal Composability_](https://arxiv.org/abs/2608.25512)。
 
-Documentation: [https://deepseek-harness.github.io/deepseek-harness/](https://deepseek-harness.github.io/deepseek-harness/)
+文档：[https://deepseek-harness.github.io/deepseek-harness/](https://deepseek-harness.github.io/deepseek-harness/)
 
-## Developer preview
+## 开发者预览
 
-DeepSeek Harness is in _developer preview_ and iterating rapidly. **THERE WILL BE COMPATIBILITY-BREAKING CHANGES.**
+DeepSeek Harness 处于 _开发者预览_ 阶段，正在快速迭代。**未来将出现破坏兼容性的变更。**
 
-Review the [safety notice](SAFETY.md) before running the project.
+运行本项目前，请阅读[安全说明](SAFETY.zh.md)。
 
-## Run
+<a id="run"></a>
 
-### Run from `npm`
+## 运行
 
-Install `Node.js`, then run:
+### 通过 `npm` 运行
+
+安装 `Node.js`，然后运行：
 
 ```sh
 npx @deepseek-ai/dsh web
 ```
 
-The command starts the Web UI at `http://127.0.0.1:3080` by default and opens it in the default browser for a local launch. An SSH launch only prints the host URL because the SSH client or editor owns the local forwarded address. Pass `--no-open` to run the server without opening a browser. See [Web UI guide](docs/user/guide/index.md).
+该命令默认会在 `http://127.0.0.1:3080` 启动 Web UI，本机启动时还会用默认浏览器打开页面。通过 SSH 启动时只打印宿主机 URL，因为本地转发地址由 SSH 客户端或编辑器持有。传入 `--no-open` 可仅运行服务器而不打开浏览器。详见 [Web UI 指南](docs/user/guide/index.zh.md)。
 
-### Run from source
+<a id="run-from-source"></a>
 
-To run from a repository checkout:
+### 从源码运行
+
+如需从仓库源码运行：
 
 ```sh
 git clone https://github.com/deepseek-ai/deepseek-harness.git
@@ -45,54 +47,67 @@ pnpm run build
 pnpm dsh web
 ```
 
-`pnpm run build` prepares the repository artifacts. `pnpm dsh web` uses those built artifacts without rebuilding.
+`pnpm run build` 会准备仓库产物。`pnpm dsh web` 会直接使用这些已构建产物，不会重新构建。
 
-### Run from Docker
+### 通过 Docker 运行
 
-Prebuilt images are available at `ghcr.io/workbuddy-repo/deepseek-harness`. The repository's
-[`docker-compose.yml`](docker-compose.yml) only pulls and runs — it never builds locally.
+预构建镜像发布在 `ghcr.io/workbuddy-repo/deepseek-harness`。仓库根目录的
+[`docker-compose.yml`](docker-compose.yml) 只负责拉取与运行，不会在本地构建。
 
 ```sh
 mkdir -p data workspace
-sudo chown -R 1000:1000 data workspace   # must match the container user
+sudo chown -R 1000:1000 data workspace   # 需与容器内用户一致
 
 docker compose up -d
-docker logs dsh | grep 'token='          # open the printed URL, token included
+docker logs dsh | grep 'token='          # 打开日志里带 token 的链接
 ```
 
-Two bind mounts carry all mutable state: `./data` holds sessions, credentials, profiles and installed
-plugins (`DSH_HOME`); `./workspace` is the directory the agent reads and writes.
+两个挂载目录承载全部可变状态：`./data` 存会话日志、凭证、profile 和已安装插件（`DSH_HOME`）；
+`./workspace` 是 agent 读写项目的根目录。
 
-Two things are easy to get wrong:
+两处最容易踩空：
 
-- **Set `DSH_LAN_ADDR` to the address you type in the browser.** The container cannot bind `0.0.0.0`,
-  so the entrypoint resolves the container address at startup, while `/api` requests are fenced by the
-  browser's `Host` header. If the two disagree, the page loads but every API call returns `403`.
-- **The first visit must carry `?token=`.** Opening the bare `IP:3080` (or the NAS panel's "open" button,
-  which does not append a token) returns `401`. The login cookie is issued on the first token visit; after
-  that the bare address works.
+- **`DSH_LAN_ADDR` 要填成浏览器里实际输入的地址。** 容器不能绑 `0.0.0.0`，入口脚本会在启动时
+  解析容器地址；而 `/api` 请求受浏览器 `Host` 头围栏保护。两者不一致时页面能打开，但每个接口都返回 `403`。
+- **首次访问必须带 `?token=`。** 直接打开 `IP:3080`（或 NAS 面板的「访问」按钮，它不会附加 token）
+  只会得到 `401`。首次用带 token 的链接访问后会种下登录 cookie，之后裸地址即可正常使用。
 
-Full guide, environment variables and a troubleshooting sequence: [docker/README.md](docker/README.md).
+完整说明、环境变量与排障顺序见 [docker/README.md](docker/README.md)。
 
-## Community and support
+## 社区与支持
 
-- Submit feedback or bug reports through [GitHub Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions).
-- Add the [`dsh-plugin`](https://github.com/topics/dsh-plugin) topic to your plugin repository for discoverability.
-- Join <a href="https://discord.gg/4MrtZUhpxg">DeepSeek Harness Discord community</a>.
+- 通过 [GitHub Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions) 提交反馈或 bug 报告。
+- 为你的插件仓库添加 [`dsh-plugin`](https://github.com/topics/dsh-plugin) 话题，便于被发现。
+- 欢迎加入 DeepSeek Harness 企微群！扫描下方二维码填写入群问卷，小助手会定期发送入群邀请。
 
-## Contributing
+<table>
+  <thead>
+    <tr>
+      <th align="center">入群问卷</th>
+      <th align="center">微信公众号</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td align="center"><a href="https://trtgsjkv6r.feishu.cn/share/base/form/shrcnIt5twSVdLGD52KJBckGCgg"><img src="https://cdn.deepseek.com/harness/readme/community-wecom-survey.png" alt="DeepSeek Harness 入群问卷二维码" width="180" height="180"></a></td>
+      <td align="center"><img src="https://cdn.deepseek.com/harness/readme/community-wechat-official-account.png" alt="DeepSeek Harness 团队微信公众号二维码" width="180" height="180"></td>
+    </tr>
+  </tbody>
+</table>
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+## 参与贡献
 
-## Development
+参见 [CONTRIBUTING.md](CONTRIBUTING.zh.md)。
 
-Start with the [development guide](docs/development.md) and [architecture documentation](docs/architecture.md).
+## 开发
 
-`pnpm run dev:web` builds, serves, and rebuilds client bundles on source edits in one terminal, and `make help` lists the matching Make targets for Web and Desktop; the guide's application commands section owns the full table.
+请先阅读[开发指南](docs/development.zh.md)与[架构文档](docs/architecture.zh.md)。
 
-For agents, follow [AGENTS.md](AGENTS.md).
+`pnpm run dev:web` 会在一个终端里完成构建、启动，并在源码修改时重建 client bundle；`make help` 列出 Web 与 Desktop 对应的 Make target。完整表格见开发指南的「应用命令」一节。
 
-## Citation
+面向 agent：请遵循 [AGENTS.md](AGENTS.md)。
+
+## 引用
 
 ```bibtex
 @misc{deepseek-harness2026,
@@ -104,8 +119,8 @@ For agents, follow [AGENTS.md](AGENTS.md).
 }
 ```
 
-## License
+## 许可证
 
 [MIT](LICENSE)
 
-Third-party dependencies and their licenses are disclosed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+第三方依赖及其许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

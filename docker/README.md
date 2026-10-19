@@ -45,7 +45,7 @@
 
 ### 方式一：docker compose（推荐）
 
-仓库根目录的 `docker-compose.yml` 已经配好两个持久化映射：
+仓库根目录的 `docker-compose.yml` 走 **host 网络**，文件里没有任何 IP，也不需要 `.env`：
 
 | 宿主路径 | 容器路径 | 内容 |
 |---|---|---|
@@ -54,34 +54,41 @@
 
 ```bash
 mkdir -p data workspace
-sudo chown -R 10001:10001 data workspace   # 容器内 uid 默认 10001
-
+sudo chown -R 1000:1000 data workspace     # 与 compose 里的 user 对齐
 docker compose pull
 docker compose up -d
 
 docker logs dsh | grep 'token='            # 取带 token 的启动 URL
 ```
 
-路径可以用 `.env` 覆盖，不必改 compose：
+启动时会打印两行自检信息，出问题先看这里：
 
-```dotenv
-DSH_DATA_DIR=/srv/dsh/state
-DSH_WORKSPACE_DIR=/srv/projects/my-app
-DSH_PORT=3080
-DSH_TRUSTED_HOSTS=localhost 127.0.0.1 192.168.1.20:3080
-DEEPSEEK_API_KEY=sk-xxx
+```
+dsh: listen   192.168.1.13:3080
+dsh: trusted  192.168.1.13 fnos localhost 127.0.0.1
 ```
 
-> 默认只绑定 `127.0.0.1`。要局域网访问，设 `DSH_BIND_ADDR=0.0.0.0`，
-> 并把访问用的 `IP:端口` 加进 `DSH_TRUSTED_HOSTS`，否则接口返回 403。
+`listen` 是自动探测到的「默认路由网卡」地址，`trusted` 是本机所有地址 + 主机名 + 回环。
+宿主换 IP、换网段、换 DHCP 租约之后，`docker compose up -d` 重启一次即可，不用改文件。
+
+只有**用域名访问**（反向代理、飞牛远程访问）时才需要补一条：
+
+```dotenv
+DSH_TRUSTED_HOSTS=dsh.example.com
+```
+
+> host 网络的两个副作用，都属于正常：
+> - 飞牛面板里看不到端口映射（没有 NAT，容器直接占用宿主 3080）；
+> - 在 NAS 本机上用 `localhost:3080` 连不上，请用 NAS 的局域网 IP（dsh 只绑一块具体网卡，不监听回环）。
 
 ### 方式二：docker run
 
 ```bash
-docker run -d --name dsh -p 3080:3080 \
+docker run -d --name dsh --network host \
   -v "$PWD/data:/data" \
   -v "$PWD/workspace:/workspace" \
-  ghcr.io/<owner>/deepseek-harness:latest
+  -u "$(id -u):$(id -g)" \
+  ghcr.io/workbuddy-repo/deepseek-harness:latest
 
 docker logs dsh | grep 'token='    # 取带 token 的启动 URL，浏览器打开
 ```
@@ -90,11 +97,11 @@ docker logs dsh | grep 'token='    # 取带 token 的启动 URL，浏览器打�
 
 ### 在飞牛 fnOS 上部署
 
-仓库根目录的 `docker-compose.yml` 已按飞牛场景设好默认值（`0.0.0.0` 绑定、uid 1000、GHCR 镜像），界面里粘贴即可：
+仓库根目录的 `docker-compose.yml` 已按飞牛场景设好默认值（host 网络、uid 1000、GHCR 镜像），界面里粘贴即可：
 
-1. **Docker → Compose → 新增项目**，路径选一个空文件夹（如 `/vol1/1000/dsh`）。
+1. **Docker → Compose → 新增项目**，路径选一个空文件夹（如 `/vol1/1000/Docker/DSH`）。
 2. 先用「文件管理」在该目录下建 `data`、`workspace` 两个文件夹——以自己账户创建，属主才是 1000，容器才写得进去。
-3. 粘贴 compose 内容，把 `192.168.1.100` 改成 NAS 的局域网 IP（由 `DSH_LAN_ADDR` 一个变量控制，对应两处）。
+3. 粘贴 compose 内容，**不用改任何 IP**。
 4. 勾选「创建项目后立即启动」。
 
 拉镜像前建议先在 SSH 里确认网络可达（ghcr.io 国内常超时）：
@@ -103,7 +110,7 @@ docker logs dsh | grep 'token='    # 取带 token 的启动 URL，浏览器打�
 docker pull ghcr.io/workbuddy-repo/deepseek-harness:latest
 ```
 
-起来后 `docker logs dsh | grep 'token='`；因为设了 `DSH_PUBLIC_URL`，日志里的链接可以直接点开。
+起来后 `docker logs dsh | grep 'token='`，日志里打印的地址可以直接点开。
 
 ## 几个不能想当然的地方
 
@@ -111,23 +118,24 @@ docker pull ghcr.io/workbuddy-repo/deepseek-harness:latest
 
 | 约束 | 说明 |
 |---|---|
-| **`--host 0.0.0.0` 会失败** | dsh 的 HTTP 服务拒绝通配地址，只接受具体网卡字面量。容器 IP 运行时才定，所以由 `docker-entrypoint.sh` 解析后注入 |
+| **`--host 0.0.0.0` 会失败** | dsh 的 HTTP 服务拒绝通配地址，只接受具体网卡字面量。所以监听地址由 `docker-entrypoint.sh` 运行时解析（`resolve-host.mjs`，默认路由网卡优先） |
+| **Host 围栏与监听地址是两件事** | 页面能打开但接口 403，说明 `Host` 不在信任列表。host 网络下监听地址自动受信，故无需配置；bridge / 域名 / 反代场景才需要补 `DSH_TRUSTED_HOSTS` |
 | **Node 必须 ≥ 22.19** | 入口用 `import.meta.main`；22.13 实测 `dsh --version` 无输出、退出码 0，静默失败 |
 | **不需要编译工具链** | 原生模块随包提供 glibc 预编译，`npm install` 即可。因此**不要**放开 npm 的 install-scripts，那会触发 `node-gyp rebuild` 反而需要 python/g++ |
 | **首次访问必须带 token** | 裸访问返回 401，容易误判成服务挂了 |
-| **局域网/域名访问要 `--trusted-host`** | 否则页面能开、接口全 403 |
-| **挂载目录权限** | 容器内 uid 10001，挂 root 拥有的目录写不进去，需 `chown -R 10001:10001` |
+| **挂载目录权限** | 容器内以 `DSH_UID:DSH_GID`（默认 1000）运行，挂 root 拥有的目录写不进去，需 `chown -R 1000:1000` |
 
 ### 环境变量
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `DSH_PORT` | `3080` | 监听端口 |
-| `DSH_HOST` | 自动探测 | 留空即可；`--network host` 下可设 `127.0.0.1`；**不要设 `0.0.0.0`** |
-| `DSH_TRUSTED_HOSTS` | 空 | 空格分隔，如 `dsh.example.com 192.168.1.20:3080` |
-| `DSH_PUBLIC_URL` | 空 | 仅影响打印的 URL，不授予信任 |
+| `DSH_BIND_ADDR` / `DSH_HOST` | 自动探测 | 一般留空。默认路由网卡的 IPv4 作为监听地址；**不要设 `0.0.0.0`** |
+| `DSH_TRUSTED_HOSTS` | 空（自动） | 留空即信任本机所有 IPv4 + 主机名 + 回环；填了则**追加**，用于域名/反代，空格分隔 |
+| `DSH_PUBLIC_URL` | 空 | 仅影响打印的 URL，不授予信任；留空时按监听地址生成 |
 | `DSH_TLS_CERT` / `DSH_TLS_KEY` | 空 | 直连 HTTPS，必须成对 |
 | `DSH_PERMISSION_MODE` | `workspace-write` | 可设 `read-only` / `danger-full-access` |
+| `DSH_UID` / `DSH_GID` | `1000` | 容器运行身份，需与宿主目录属主一致 |
 | `DSH_HOME` | `/data` | 会话、凭证、profile、插件 |
 | `DEEPSEEK_API_KEY` | 空 | 也可在 Settings → Models 里配 |
 

@@ -59,6 +59,7 @@ RUN if command -v corepack >/dev/null 2>&1; then \
     fi
 
 COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY --chmod=0755 resolve-host.mjs /usr/local/bin/resolve-host.mjs
 COPY healthcheck.mjs /usr/local/bin/healthcheck.mjs
 
 ENV NODE_ENV=production \
